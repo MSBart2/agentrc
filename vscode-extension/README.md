@@ -18,7 +18,7 @@ Detect languages, frameworks, package managers, and monorepo structure. Results 
 
 ### Readiness Report
 
-Score your repo across **9 pillars** grouped into **Repo Health** and **AI Setup**, with maturity levels from Functional (1) to Autonomous (5).
+Score your repo across **10 pillars** grouped into **Repo Health** and **AI Setup**, with maturity levels from Functional (1) to Autonomous (5).
 
 - Interactive HTML report with dark/light theme
 - Drill-down into criteria in the **Readiness** tree view

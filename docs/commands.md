@@ -57,7 +57,7 @@ agentrc analyze [path]
 
 ## `agentrc readiness`
 
-Score readiness across 9 pillars. See [Concepts — Readiness pillars](concepts.md#readiness-pillars).
+Score readiness across 10 pillars. See [Concepts — Readiness pillars](concepts.md#readiness-pillars) and [Maturity Models](maturity-models.md).
 
 ```bash
 agentrc readiness [path]

@@ -20,6 +20,7 @@ export type ReadinessPillar =
   | "code-quality"
   | "observability"
   | "security-governance"
+  | "workflow-automation"
   | "ai-tooling";
 
 export type PillarGroup = "repo-health" | "ai-setup";
@@ -33,6 +34,7 @@ export const PILLAR_GROUPS: Record<ReadinessPillar, PillarGroup> = {
   "code-quality": "repo-health",
   observability: "repo-health",
   "security-governance": "repo-health",
+  "workflow-automation": "repo-health",
   "ai-tooling": "ai-setup"
 };
 
@@ -663,6 +665,25 @@ export function buildCriteria(): ReadinessCriterion[] {
       }
     },
     {
+      id: "branch-protection",
+      title: "Branch protection configured",
+      pillar: "security-governance",
+      level: 3,
+      scope: "repo",
+      impact: "high",
+      effort: "medium",
+      check: async (context) => {
+        const found = await hasBranchRulesets(context.repoPath);
+        return {
+          status: found ? "pass" : "fail",
+          reason: found
+            ? undefined
+            : "No branch ruleset or protection config found (.github/rulesets/*.json or .github/branch-protection.json). Add branch protection rules to prevent unreviewed merges.",
+          evidence: [".github/rulesets/*.json", ".github/branch-protection.json"]
+        };
+      }
+    },
+    {
       id: "observability",
       title: "Observability tooling present",
       pillar: "observability",
@@ -839,6 +860,124 @@ export function buildCriteria(): ReadinessCriterion[] {
         };
       }
     },
+    // ── Workflow Automation ──
+    {
+      id: "issue-templates",
+      title: "Issue templates present",
+      pillar: "workflow-automation",
+      level: 2,
+      scope: "repo",
+      impact: "high",
+      effort: "low",
+      check: async (context) => {
+        const found = await hasIssueTemplates(context.repoPath);
+        return {
+          status: found ? "pass" : "fail",
+          reason: found
+            ? undefined
+            : "Missing issue templates (.github/ISSUE_TEMPLATE/). Structured templates reduce clarification rounds when agents pick up new work items.",
+          evidence: [".github/ISSUE_TEMPLATE/", ".github/ISSUE_TEMPLATE.md"]
+        };
+      }
+    },
+    {
+      id: "pr-template",
+      title: "Pull request template present",
+      pillar: "workflow-automation",
+      level: 2,
+      scope: "repo",
+      impact: "high",
+      effort: "low",
+      check: async (context) => {
+        const templatePath = await findPullRequestTemplatePath(context.repoPath);
+        if (!templatePath) {
+          return {
+            status: "fail",
+            reason:
+              "Missing PR template (supported locations: .github/PULL_REQUEST_TEMPLATE.md, PULL_REQUEST_TEMPLATE.md, docs/PULL_REQUEST_TEMPLATE.md, or a PULL_REQUEST_TEMPLATE/*.md directory in those locations). A template with linked-issue and testing sections standardises agent-generated PR descriptions.",
+            evidence: [
+              ".github/PULL_REQUEST_TEMPLATE.md",
+              "PULL_REQUEST_TEMPLATE.md",
+              "docs/PULL_REQUEST_TEMPLATE.md",
+              ".github/PULL_REQUEST_TEMPLATE/*.md",
+              "PULL_REQUEST_TEMPLATE/*.md",
+              "docs/PULL_REQUEST_TEMPLATE/*.md"
+            ]
+          };
+        }
+        try {
+          const content = await fs.readFile(templatePath, "utf8");
+          const hasLinkedIssue = /\b(?:fixes|closes|resolves)\b\s*:?\s*#/iu.test(content);
+          return {
+            status: "pass",
+            reason: hasLinkedIssue
+              ? undefined
+              : 'PR template found but lacks a linked-issue reference ("Fixes #", "Fixes: #", "Closes #", or "Resolves #"). Add one to enable automatic issue closing on merge.'
+          };
+        } catch {
+          return { status: "pass" };
+        }
+      }
+    },
+    {
+      id: "commit-convention",
+      title: "Commit message convention enforced",
+      pillar: "workflow-automation",
+      level: 3,
+      scope: "repo",
+      impact: "high",
+      effort: "low",
+      check: async (context) => {
+        const found = await hasCommitConvention(context.repoPath);
+        return {
+          status: found ? "pass" : "fail",
+          reason: found
+            ? undefined
+            : "No commit convention config found (commitlint, commitizen). Conventional commits are required for automated changelog and release generation.",
+          evidence: ["commitlint.config.js", ".commitlintrc.json", "@commitlint/* dependency"]
+        };
+      }
+    },
+    {
+      id: "pr-labeling",
+      title: "PR auto-labeling configured",
+      pillar: "workflow-automation",
+      level: 3,
+      scope: "repo",
+      impact: "medium",
+      effort: "low",
+      check: async (context) => {
+        const found = await hasAutoLabeler(context.repoPath);
+        return {
+          status: found ? "pass" : "fail",
+          reason: found
+            ? undefined
+            : "No PR auto-labeler configured (.github/labeler.yml or actions/labeler workflow). Auto-labeling routes PRs to the right reviewers without manual triage.",
+          evidence: [".github/labeler.yml"]
+        };
+      }
+    },
+    {
+      id: "release-automation",
+      title: "Release automation configured",
+      pillar: "workflow-automation",
+      level: 4,
+      scope: "repo",
+      impact: "high",
+      effort: "medium",
+      check: async (context) => {
+        const { found, evidence } = await hasReleaseAutomation(context.repoPath);
+        return {
+          status: found ? "pass" : "fail",
+          reason: found
+            ? undefined
+            : "No release automation found (semantic-release, changesets, release-please). Automated releases eliminate manual version bumps and changelog authoring.",
+          evidence: found
+            ? evidence
+            : [".releaserc.json", ".changeset/config.json", "release-please-config.json"]
+        };
+      }
+    },
     // ── Area-scoped criteria (only run when areaPath is set) ──
     {
       id: "area-readme",
@@ -956,17 +1095,6 @@ export function buildExtras(): ExtraDefinition[] {
       }
     },
     {
-      id: "pr-template",
-      title: "Pull request template present",
-      check: async (context) => {
-        const found = await hasPullRequestTemplate(context.repoPath);
-        return {
-          status: found ? "pass" : "fail",
-          reason: found ? undefined : "Missing PR template for consistent reviews."
-        };
-      }
-    },
-    {
       id: "pre-commit",
       title: "Pre-commit hooks configured",
       check: async (context) => {
@@ -1018,6 +1146,7 @@ function summarizePillars(criteria: ReadinessCriterionResult[]): ReadinessPillar
     "code-quality": "Code Quality",
     observability: "Observability",
     "security-governance": "Security & Governance",
+    "workflow-automation": "Workflow Automation",
     "ai-tooling": "AI Tooling"
   };
 
@@ -1147,16 +1276,36 @@ async function hasLicense(repoPath: string): Promise<boolean> {
   return files.some((file) => file.toLowerCase().startsWith("license"));
 }
 
-async function hasPullRequestTemplate(repoPath: string): Promise<boolean> {
-  const direct = await fileExists(path.join(repoPath, ".github", "PULL_REQUEST_TEMPLATE.md"));
-  if (direct) return true;
-  const dir = path.join(repoPath, ".github", "PULL_REQUEST_TEMPLATE");
-  try {
-    const entries = await fs.readdir(dir);
-    return entries.some((entry) => entry.toLowerCase().endsWith(".md"));
-  } catch {
-    return false;
+async function findPullRequestTemplatePath(repoPath: string): Promise<string | undefined> {
+  const supportedDirs = [".github", "", "docs"];
+
+  for (const supportedDir of supportedDirs) {
+    const baseDir = supportedDir ? path.join(repoPath, supportedDir) : repoPath;
+    const entries = await safeReadDir(baseDir);
+    const directTemplate = entries.find(
+      (entry) => entry.toLowerCase() === "pull_request_template.md"
+    );
+    if (directTemplate) {
+      return path.join(baseDir, directTemplate);
+    }
   }
+
+  for (const supportedDir of supportedDirs) {
+    const baseDir = supportedDir ? path.join(repoPath, supportedDir) : repoPath;
+    const entries = await safeReadDir(baseDir);
+    const templateDir = entries.find((entry) => entry.toLowerCase() === "pull_request_template");
+    if (!templateDir) continue;
+
+    const templateEntries = await safeReadDir(path.join(baseDir, templateDir));
+    const templateFile = [...templateEntries]
+      .sort((a, b) => a.localeCompare(b))
+      .find((entry) => entry.toLowerCase().endsWith(".md"));
+    if (templateFile) {
+      return path.join(baseDir, templateDir, templateFile);
+    }
+  }
+
+  return undefined;
 }
 
 async function hasPrecommitConfig(repoPath: string): Promise<boolean> {
@@ -1378,4 +1527,135 @@ async function readAllDependencies(context: ReadinessContext): Promise<string[]>
   }
 
   return Array.from(new Set(dependencies));
+}
+
+async function hasIssueTemplates(repoPath: string): Promise<boolean> {
+  const single = await fileExists(path.join(repoPath, ".github", "ISSUE_TEMPLATE.md"));
+  if (single) return true;
+  const dir = path.join(repoPath, ".github", "ISSUE_TEMPLATE");
+  try {
+    const entries = await fs.readdir(dir);
+    return entries.some((e) => /\.(md|yml|yaml)$/iu.test(e));
+  } catch {
+    return false;
+  }
+}
+
+async function hasCommitConvention(repoPath: string): Promise<boolean> {
+  const configs = [
+    ".commitlintrc",
+    ".commitlintrc.json",
+    ".commitlintrc.yml",
+    ".commitlintrc.yaml",
+    ".commitlintrc.js",
+    ".commitlintrc.cjs",
+    ".commitlintrc.mjs",
+    ".commitlintrc.ts",
+    "commitlint.config.js",
+    "commitlint.config.cjs",
+    "commitlint.config.mjs",
+    "commitlint.config.ts",
+    ".cz-config.js",
+    ".czrc"
+  ];
+  for (const config of configs) {
+    if (await fileExists(path.join(repoPath, config))) return true;
+  }
+  const pkg = await readJson(path.join(repoPath, "package.json"));
+  if (pkg) {
+    const allDeps = {
+      ...((pkg.dependencies as Record<string, unknown>) ?? {}),
+      ...((pkg.devDependencies as Record<string, unknown>) ?? {})
+    };
+    if (
+      Object.keys(allDeps).some(
+        (dep) => dep.startsWith("@commitlint/") || dep === "commitlint" || dep === "commitizen"
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function hasReleaseAutomation(
+  repoPath: string
+): Promise<{ found: boolean; evidence: string[] }> {
+  const evidence: string[] = [];
+  const configs = [
+    "release.config.js",
+    "release.config.cjs",
+    "release.config.mjs",
+    "release.config.ts",
+    ".releaserc",
+    ".releaserc.json",
+    ".releaserc.yml",
+    ".releaserc.yaml",
+    ".releaserc.js",
+    ".releaserc.cjs",
+    ".changeset/config.json",
+    "release-please-config.json"
+  ];
+  for (const config of configs) {
+    if (await fileExists(path.join(repoPath, config))) {
+      evidence.push(config);
+    }
+  }
+  const workflowsDir = path.join(repoPath, ".github", "workflows");
+  try {
+    const workflows = await fs.readdir(workflowsDir);
+    for (const workflow of workflows) {
+      if (!/\.ya?ml$/iu.test(workflow)) continue;
+      try {
+        const content = await fs.readFile(path.join(workflowsDir, workflow), "utf8");
+        if (
+          content.includes("semantic-release") ||
+          content.includes("changesets/action") ||
+          content.includes("googleapis/release-please-action")
+        ) {
+          evidence.push(`.github/workflows/${workflow}`);
+        }
+      } catch {
+        // skip unreadable workflow
+      }
+    }
+  } catch {
+    // no workflows directory
+  }
+  return { found: evidence.length > 0, evidence };
+}
+
+async function hasAutoLabeler(repoPath: string): Promise<boolean> {
+  for (const file of [".github/labeler.yml", ".github/labeler.yaml", ".github/labeler.json"]) {
+    if (await fileExists(path.join(repoPath, file))) return true;
+  }
+  const workflowsDir = path.join(repoPath, ".github", "workflows");
+  try {
+    const workflows = await fs.readdir(workflowsDir);
+    for (const workflow of workflows) {
+      if (!/\.ya?ml$/iu.test(workflow)) continue;
+      try {
+        const content = await fs.readFile(path.join(workflowsDir, workflow), "utf8");
+        if (content.includes("actions/labeler")) return true;
+      } catch {
+        // skip unreadable workflow
+      }
+    }
+  } catch {
+    // no workflows directory
+  }
+  return false;
+}
+
+async function hasBranchRulesets(repoPath: string): Promise<boolean> {
+  const rulesetsDir = path.join(repoPath, ".github", "rulesets");
+  if (await fileExists(rulesetsDir)) {
+    try {
+      const entries = await fs.readdir(rulesetsDir);
+      if (entries.some((e) => e.endsWith(".json"))) return true;
+    } catch {
+      // skip unreadable directory
+    }
+  }
+  return fileExists(path.join(repoPath, ".github", "branch-protection.json"));
 }
